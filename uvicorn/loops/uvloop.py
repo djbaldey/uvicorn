@@ -1,7 +1,7 @@
-import asyncio
+from asyncio import set_event_loop_policy
 
-import uvloop
+from uvloop import EventLoopPolicy
 
 
 def uvloop_setup():
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    set_event_loop_policy(EventLoopPolicy())
