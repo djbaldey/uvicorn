@@ -1,5 +1,5 @@
-import html
-import traceback
+from html import escape as html_escape
+from traceback import format_exc
 
 
 class HTMLResponse:
@@ -82,14 +82,14 @@ class DebugMiddleware:
 
             accept = get_accept_header(scope)
             if "text/html" in accept:
-                exc_html = html.escape(traceback.format_exc())
+                exc_html = html_escape(format_exc())
                 content = (
                     "<html><body><h1>500 Server Error</h1><pre>%s</pre></body></html>"
                     % exc_html
                 )
                 response = HTMLResponse(content, status_code=500)
             else:
-                content = traceback.format_exc()
+                content = format_exc()
                 response = PlainTextResponse(content, status_code=500)
 
             await response(scope, receive, send)

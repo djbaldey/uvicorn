@@ -1,7 +1,7 @@
-import asyncio
-import concurrent.futures
-import io
 import sys
+from asyncio import Event, wait_for as asyncio_wait_for, get_event_loop
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 
 
 def build_environ(scope, message, body):
@@ -16,7 +16,7 @@ def build_environ(scope, message, body):
         "SERVER_PROTOCOL": "HTTP/%s" % scope["http_version"],
         "wsgi.version": (1, 0),
         "wsgi.url_scheme": scope.get("scheme", "http"),
-        "wsgi.input": io.BytesIO(body),
+        "wsgi.input": BytesIO(body),
         "wsgi.errors": sys.stdout,
         "wsgi.multithread": True,
         "wsgi.multiprocess": True,
@@ -55,7 +55,7 @@ def build_environ(scope, message, body):
 class WSGIMiddleware:
     def __init__(self, app, workers=10):
         self.app = app
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        self.executor = ThreadPoolExecutor(max_workers=workers)
 
     async def __call__(self, scope, receive, send):
         assert scope["type"] == "http"
@@ -70,7 +70,7 @@ class WSGIResponder:
         self.scope = scope
         self.status = None
         self.response_headers = None
-        self.send_event = asyncio.Event()
+        self.send_event = Event()
         self.send_queue = []
         self.loop = None
         self.response_started = False
@@ -85,30 +85,33 @@ class WSGIResponder:
             body += body_message.get("body", b"")
             more_body = body_message.get("more_body", False)
         environ = build_environ(self.scope, message, body)
-        self.loop = asyncio.get_event_loop()
-        wsgi = self.loop.run_in_executor(
+        self.loop = loop = get_event_loop()
+        wsgi = loop.run_in_executor(
             self.executor, self.wsgi, environ, self.start_response
         )
-        sender = self.loop.create_task(self.sender(send))
+        sender = loop.create_task(self.sender(send))
         try:
-            await asyncio.wait_for(wsgi, None)
+            await asyncio_wait_for(wsgi, None)
         finally:
             self.send_queue.append(None)
             self.send_event.set()
-            await asyncio.wait_for(sender, None)
-        if self.exc_info is not None:
-            raise self.exc_info[0].with_traceback(self.exc_info[1], self.exc_info[2])
+            await asyncio_wait_for(sender, None)
+        exc_info = self.exc_info
+        if exc_info is not None:
+            raise exc_info[0].with_traceback(exc_info[1], exc_info[2])
 
     async def sender(self, send):
+        queue = self.send_queue
+        event = self.send_event
         while True:
-            if self.send_queue:
-                message = self.send_queue.pop(0)
+            if queue:
+                message = queue.pop(0)
                 if message is None:
                     return
                 await send(message)
             else:
-                await self.send_event.wait()
-                self.send_event.clear()
+                await event.wait()
+                event.clear()
 
     def start_response(self, status, response_headers, exc_info=None):
         self.exc_info = exc_info
@@ -130,11 +133,14 @@ class WSGIResponder:
             self.loop.call_soon_threadsafe(self.send_event.set)
 
     def wsgi(self, environ, start_response):
+        event = self.send_event
+        queue = self.send_queue
+        call_soon_threadsafe = self.loop.call_soon_threadsafe
         for chunk in self.app(environ, start_response):
-            self.send_queue.append(
+            queue.append(
                 {"type": "http.response.body", "body": chunk, "more_body": True}
             )
-            self.loop.call_soon_threadsafe(self.send_event.set)
+            call_soon_threadsafe(event.set)
 
-        self.send_queue.append({"type": "http.response.body", "body": b""})
-        self.loop.call_soon_threadsafe(self.send_event.set)
+        queue.append({"type": "http.response.body", "body": b""})
+        call_soon_threadsafe(event.set)
