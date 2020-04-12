@@ -1,7 +1,7 @@
-import asyncio
 import http
 import logging
 import urllib
+from asyncio import Event, Protocol, get_event_loop
 
 import httptools
 
@@ -36,7 +36,7 @@ class FlowControl:
         self._transport = transport
         self.read_paused = False
         self.write_paused = False
-        self._is_writable_event = asyncio.Event()
+        self._is_writable_event = Event()
         self._is_writable_event.set()
 
     async def drain(self):
@@ -77,14 +77,14 @@ async def service_unavailable(scope, receive, send):
     await send({"type": "http.response.body", "body": b"Service Unavailable"})
 
 
-class HttpToolsProtocol(asyncio.Protocol):
+class HttpToolsProtocol(Protocol):
     def __init__(self, config, server_state, _loop=None):
         if not config.loaded:
             config.load()
 
         self.config = config
         self.app = config.loaded_app
-        self.loop = _loop or asyncio.get_event_loop()
+        self.loop = _loop or get_event_loop()
         self.logger = logging.getLogger("uvicorn.error")
         self.access_logger = logging.getLogger("uvicorn.access")
         self.access_log = self.access_logger.hasHandlers()
@@ -117,7 +117,7 @@ class HttpToolsProtocol(asyncio.Protocol):
         self.headers = None
         self.expect_100_continue = False
         self.cycle = None
-        self.message_event = asyncio.Event()
+        self.message_event = Event()
 
     # Protocol interface
     def connection_made(self, transport):

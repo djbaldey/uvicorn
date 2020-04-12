@@ -1,4 +1,4 @@
-import logging
+from logging import getLogger
 
 PLACEHOLDER_FORMAT = {
     "body": "<{length} bytes>",
@@ -27,12 +27,12 @@ class MessageLoggerMiddleware:
     def __init__(self, app):
         self.task_counter = 0
         self.app = app
-        self.logger = logging.getLogger("uvicorn.asgi")
+        self.logger = logger = getLogger("uvicorn.asgi")
 
         def trace(message, *args, **kwargs):
-            logging.log(TRACE_LOG_LEVEL, message, *args, **kwargs)
+            logger.log(TRACE_LOG_LEVEL, message, *args, **kwargs)
 
-        self.logger.trace = trace
+        logger.trace = trace
 
     async def __call__(self, scope, receive, send):
         self.task_counter += 1
