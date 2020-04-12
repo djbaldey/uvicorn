@@ -1,5 +1,5 @@
-import asyncio
-import logging
+from asyncio import get_event_loop
+from logging import getLogger
 
 from gunicorn.workers.base import Worker
 
@@ -18,14 +18,18 @@ class UvicornWorker(Worker):
     def __init__(self, *args, **kwargs):
         super(UvicornWorker, self).__init__(*args, **kwargs)
 
-        logger = logging.getLogger("uvicorn.error")
-        logger.handlers = self.log.error_log.handlers
-        logger.setLevel(self.log.error_log.level)
+        log = self.log
+
+        error_log = log.error_log
+        logger = getLogger("uvicorn.error")
+        logger.handlers = error_log.handlers
+        logger.setLevel(error_log.level)
         logger.propagate = False
 
-        logger = logging.getLogger("uvicorn.access")
-        logger.handlers = self.log.access_log.handlers
-        logger.setLevel(self.log.access_log.level)
+        access_log = log.access_log
+        logger = getLogger("uvicorn.access")
+        logger.handlers = access_log.handlers
+        logger.setLevel(access_log.level)
         logger.propagate = False
 
         config_kwargs = {
@@ -66,7 +70,7 @@ class UvicornWorker(Worker):
     def run(self):
         self.config.app = self.wsgi
         server = Server(config=self.config)
-        loop = asyncio.get_event_loop()
+        loop = get_event_loop()
         loop.run_until_complete(server.serve(sockets=self.sockets))
 
     async def callback_notify(self):

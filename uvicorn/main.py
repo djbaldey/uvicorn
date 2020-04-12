@@ -1,4 +1,3 @@
-import asyncio
 import functools
 import logging
 import os
@@ -9,9 +8,11 @@ import ssl
 import sys
 import time
 import typing
+from asyncio import get_event_loop, sleep as asyncio_sleep
 from email.utils import formatdate
 
 import click
+from click import style as click_style
 
 import uvicorn
 from uvicorn.config import (
@@ -40,6 +41,8 @@ HANDLED_SIGNALS = (
 )
 
 logger = logging.getLogger("uvicorn.error")
+log_info = logger.info
+log_error = logger.error
 
 
 def print_version(ctx, param, value):
@@ -336,8 +339,9 @@ def run(app, **kwargs):
     server = Server(config=config)
 
     if (config.reload or config.workers > 1) and not isinstance(app, str):
+        # The logger may have changed, so we get it again.
         logger = logging.getLogger("uvicorn.error")
-        logger.warn(
+        logger.warning(
             "You must pass the application as an import string to enable 'reload' or 'workers'."
         )
         sys.exit(1)
@@ -378,7 +382,7 @@ class Server:
 
     def run(self, sockets=None):
         self.config.setup_event_loop()
-        loop = asyncio.get_event_loop()
+        loop = get_event_loop()
         loop.run_until_complete(self.serve(sockets=sockets))
 
     async def serve(self, sockets=None):
@@ -393,8 +397,8 @@ class Server:
         self.install_signal_handlers()
 
         message = "Started server process [%d]"
-        color_message = "Started server process [" + click.style("%d", fg="cyan") + "]"
-        logger.info(message, process_id, extra={"color_message": color_message})
+        color_message = "Started server process [" + click_style("%d", fg="cyan") + "]"
+        log_info(message, process_id, extra={"color_message": color_message})
 
         await self.startup(sockets=sockets)
         if self.should_exit:
@@ -403,8 +407,8 @@ class Server:
         await self.shutdown(sockets=sockets)
 
         message = "Finished server process [%d]"
-        color_message = "Finished server process [" + click.style("%d", fg="cyan") + "]"
-        logger.info(
+        color_message = "Finished server process [" + click_style("%d", fg="cyan") + "]"
+        log_info(
             "Finished server process [%d]",
             process_id,
             extra={"color_message": color_message},
@@ -422,17 +426,18 @@ class Server:
             config.http_protocol_class, config=config, server_state=self.server_state
         )
 
-        loop = asyncio.get_event_loop()
+        loop = get_event_loop()
 
         if sockets is not None:
             # Explicitly passed a list of open sockets.
             # We use this when the server is run from a Gunicorn worker.
             self.servers = []
+            servers_append = self.servers.append
             for sock in sockets:
                 server = await loop.create_server(
                     create_protocol, sock=sock, ssl=config.ssl, backlog=config.backlog
                 )
-                self.servers.append(server)
+                servers_append(server)
 
         elif config.fd is not None:
             # Use an existing socket, from a file descriptor.
@@ -441,7 +446,7 @@ class Server:
                 create_protocol, sock=sock, ssl=config.ssl, backlog=config.backlog
             )
             message = "Uvicorn running on socket %s (Press CTRL+C to quit)"
-            logger.info(message % str(sock.getsockname()))
+            log_info(message % str(sock.getsockname()))
             self.servers = [server]
 
         elif config.uds is not None:
@@ -454,7 +459,7 @@ class Server:
             )
             os.chmod(config.uds, uds_perms)
             message = "Uvicorn running on unix socket %s (Press CTRL+C to quit)"
-            logger.info(message % config.uds)
+            log_info(message % config.uds)
             self.servers = [server]
 
         else:
@@ -468,7 +473,7 @@ class Server:
                     backlog=config.backlog,
                 )
             except OSError as exc:
-                logger.error(exc)
+                log_error(exc)
                 await self.lifespan.shutdown()
                 sys.exit(1)
             port = config.port
@@ -478,10 +483,10 @@ class Server:
             message = "Uvicorn running on %s://%s:%d (Press CTRL+C to quit)"
             color_message = (
                 "Uvicorn running on "
-                + click.style("%s://%s:%d", bold=True)
+                + click_style("%s://%s:%d", bold=True)
                 + " (Press CTRL+C to quit)"
             )
-            logger.info(
+            log_info(
                 message,
                 protocol_name,
                 config.host,
@@ -494,37 +499,39 @@ class Server:
 
     async def main_loop(self):
         counter = 0
-        should_exit = await self.on_tick(counter)
+        on_tick = self.on_tick
+        should_exit = await on_tick(counter)
         while not should_exit:
             counter += 1
             counter = counter % 864000
-            await asyncio.sleep(0.1)
-            should_exit = await self.on_tick(counter)
+            await asyncio_sleep(0.1)
+            should_exit = await on_tick(counter)
 
     async def on_tick(self, counter) -> bool:
+        config = self.config
         # Update the default headers, once per second.
         if counter % 10 == 0:
             current_time = time.time()
             current_date = formatdate(current_time, usegmt=True).encode()
             self.server_state.default_headers = [
                 (b"date", current_date)
-            ] + self.config.encoded_headers
+            ] + config.encoded_headers
 
             # Callback to `callback_notify` once every `timeout_notify` seconds.
-            if self.config.callback_notify is not None:
-                if current_time - self.last_notified > self.config.timeout_notify:
+            if config.callback_notify is not None:
+                if current_time - self.last_notified > config.timeout_notify:
                     self.last_notified = current_time
-                    await self.config.callback_notify()
+                    await config.callback_notify()
 
         # Determine if we should exit.
         if self.should_exit:
             return True
-        if self.config.limit_max_requests is not None:
-            return self.server_state.total_requests >= self.config.limit_max_requests
+        if config.limit_max_requests is not None:
+            return self.server_state.total_requests >= config.limit_max_requests
         return False
 
     async def shutdown(self, sockets=None):
-        logger.info("Shutting down")
+        log_info("Shutting down")
 
         # Stop accepting new connections.
         for server in self.servers:
@@ -534,39 +541,44 @@ class Server:
         for server in self.servers:
             await server.wait_closed()
 
+        state = self.server_state
+
         # Request shutdown on all existing connections.
-        for connection in list(self.server_state.connections):
+        for connection in list(state.connections):
             connection.shutdown()
-        await asyncio.sleep(0.1)
+        await asyncio_sleep(0.1)
 
         # Wait for existing connections to finish sending responses.
-        if self.server_state.connections and not self.force_exit:
+        if state.connections and not self.force_exit:
             msg = "Waiting for connections to close. (CTRL+C to force quit)"
-            logger.info(msg)
-            while self.server_state.connections and not self.force_exit:
-                await asyncio.sleep(0.1)
+            log_info(msg)
+            while state.connections and not self.force_exit:
+                await asyncio_sleep(0.1)
 
         # Wait for existing tasks to complete.
-        if self.server_state.tasks and not self.force_exit:
+        if state.tasks and not self.force_exit:
             msg = "Waiting for background tasks to complete. (CTRL+C to force quit)"
-            logger.info(msg)
-            while self.server_state.tasks and not self.force_exit:
-                await asyncio.sleep(0.1)
+            log_info(msg)
+            while state.tasks and not self.force_exit:
+                await asyncio_sleep(0.1)
 
         # Send the lifespan shutdown event, and wait for application shutdown.
         if not self.force_exit:
             await self.lifespan.shutdown()
 
     def install_signal_handlers(self):
-        loop = asyncio.get_event_loop()
+        loop = get_event_loop()
+        handle_exit = self.handle_exit
 
         try:
+            connect = loop.add_signal_handler
             for sig in HANDLED_SIGNALS:
-                loop.add_signal_handler(sig, self.handle_exit, sig, None)
+                connect(sig, handle_exit, sig, None)
         except NotImplementedError:
             # Windows
+            connect = signal.signal
             for sig in HANDLED_SIGNALS:
-                signal.signal(sig, self.handle_exit)
+                connect(sig, handle_exit)
 
     def handle_exit(self, sig, frame):
         if self.should_exit:

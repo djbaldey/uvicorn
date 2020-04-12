@@ -1,8 +1,8 @@
-import http
 import logging
 import sys
+from http import HTTPStatus
 
-import click
+from click import style as click_style
 
 TRACE_LOG_LEVEL = 5
 
@@ -17,12 +17,12 @@ class ColourizedFormatter(logging.Formatter):
     """
 
     level_name_colors = {
-        TRACE_LOG_LEVEL: lambda level_name: click.style(str(level_name), fg="blue"),
-        logging.DEBUG: lambda level_name: click.style(str(level_name), fg="cyan"),
-        logging.INFO: lambda level_name: click.style(str(level_name), fg="green"),
-        logging.WARNING: lambda level_name: click.style(str(level_name), fg="yellow"),
-        logging.ERROR: lambda level_name: click.style(str(level_name), fg="red"),
-        logging.CRITICAL: lambda level_name: click.style(
+        TRACE_LOG_LEVEL: lambda level_name: click_style(str(level_name), fg="blue"),
+        logging.DEBUG: lambda level_name: click_style(str(level_name), fg="cyan"),
+        logging.INFO: lambda level_name: click_style(str(level_name), fg="green"),
+        logging.WARNING: lambda level_name: click_style(str(level_name), fg="yellow"),
+        logging.ERROR: lambda level_name: click_style(str(level_name), fg="red"),
+        logging.CRITICAL: lambda level_name: click_style(
             str(level_name), fg="bright_red"
         ),
     }
@@ -44,13 +44,14 @@ class ColourizedFormatter(logging.Formatter):
 
     def formatMessage(self, record):
         levelname = record.levelname
+        record_dict = record.__dict__
         seperator = " " * (8 - len(record.levelname))
         if self.use_colors:
             levelname = self.color_level_name(levelname, record.levelno)
-            if "color_message" in record.__dict__:
-                record.msg = record.__dict__["color_message"]
-                record.__dict__["message"] = record.getMessage()
-        record.__dict__["levelprefix"] = levelname + ":" + seperator
+            if "color_message" in record_dict:
+                record.msg = record_dict["color_message"]
+                record_dict["message"] = record.getMessage()
+        record_dict["levelprefix"] = levelname + ":" + seperator
         return super().formatMessage(record)
 
 
@@ -61,11 +62,11 @@ class DefaultFormatter(ColourizedFormatter):
 
 class AccessFormatter(ColourizedFormatter):
     status_code_colours = {
-        1: lambda code: click.style(str(code), fg="bright_white"),
-        2: lambda code: click.style(str(code), fg="green"),
-        3: lambda code: click.style(str(code), fg="yellow"),
-        4: lambda code: click.style(str(code), fg="red"),
-        5: lambda code: click.style(str(code), fg="bright_red"),
+        1: lambda code: click_style(str(code), fg="bright_white"),
+        2: lambda code: click_style(str(code), fg="green"),
+        3: lambda code: click_style(str(code), fg="yellow"),
+        4: lambda code: click_style(str(code), fg="red"),
+        5: lambda code: click_style(str(code), fg="bright_red"),
     }
 
     def get_client_addr(self, scope):
@@ -87,7 +88,7 @@ class AccessFormatter(ColourizedFormatter):
     def get_status_code(self, record):
         status_code = record.__dict__["status_code"]
         try:
-            status_phrase = http.HTTPStatus(status_code).phrase
+            status_phrase = HTTPStatus(status_code).phrase
         except ValueError:
             status_phrase = ""
         status_and_phrase = "%s %s" % (status_code, status_phrase)
@@ -99,7 +100,8 @@ class AccessFormatter(ColourizedFormatter):
         return status_and_phrase
 
     def formatMessage(self, record):
-        scope = record.__dict__["scope"]
+        record_dict = record.__dict__
+        scope = record_dict["scope"]
         method = scope["method"]
         path = self.get_path(scope)
         full_path = self.get_full_path(scope)
@@ -108,8 +110,8 @@ class AccessFormatter(ColourizedFormatter):
         http_version = scope["http_version"]
         request_line = "%s %s HTTP/%s" % (method, full_path, http_version)
         if self.use_colors:
-            request_line = click.style(request_line, bold=True)
-        record.__dict__.update(
+            request_line = click_style(request_line, bold=True)
+        record_dict.update(
             {
                 "method": method,
                 "path": path,

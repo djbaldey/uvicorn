@@ -3,12 +3,12 @@ Some light wrappers around Python's multiprocessing, to deal with cleanly
 starting child processes.
 """
 import multiprocessing
-import os
-import signal
 import sys
+from os import fdopen, kill, waitpid
+from signal import SIGINT
 
 multiprocessing.allow_connection_pickling()
-spawn = multiprocessing.get_context("spawn")
+SpawnProcess = multiprocessing.get_context("spawn").Process
 
 
 def get_subprocess(config, target, sockets):
@@ -36,7 +36,7 @@ def get_subprocess(config, target, sockets):
         "stdin_fileno": stdin_fileno,
     }
 
-    return spawn.Process(target=subprocess_started, kwargs=kwargs)
+    return SpawnProcess(target=subprocess_started, kwargs=kwargs)
 
 
 def subprocess_started(config, target, sockets, stdin_fileno):
@@ -53,7 +53,7 @@ def subprocess_started(config, target, sockets, stdin_fileno):
     """
     # Re-open stdin.
     if stdin_fileno is not None:
-        sys.stdin = os.fdopen(stdin_fileno)
+        sys.stdin = fdopen(stdin_fileno)
 
     # Logging needs to be setup again for each child.
     config.configure_logging()
@@ -68,5 +68,5 @@ def shutdown_subprocess(pid):
 
     * pid - Process identifier.
     """
-    os.kill(pid, signal.SIGINT)
-    os.waitpid(pid, 0)
+    kill(pid, SIGINT)
+    waitpid(pid, 0)
