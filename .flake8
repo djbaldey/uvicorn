@@ -1,0 +1,17 @@
+[flake8]
+ignore =
+    # Conflict with old style W503.
+    W503,
+    E203,E731,
+    # The restriction on the length of strings.
+    E501
+exclude =
+    # Git certainly doesn't need to be checked.
+    .git,
+    venv,
+    # Bytecode directories to skiping.
+    __pycache__,
+    # Eggs from installation, they can not escape!
+    *.egg-info
+# Maximum number of conditions within one function.
+max-complexity = 32
